@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#192b39">
+  <meta name="description" content="Everything: your personal planner, lists, food and life in one private-by-default app.">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="icon" href="./icon.svg" type="image/svg+xml">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="stylesheet" href="./styles.css">
+  <title>Everything — your life, your way</title>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Primary navigation">
+      <a href="#home" class="brand" aria-label="Everything home"><span class="brand-mark">e.</span><span><strong>everything</strong><small>your space, organized</small></span></a>
+      <div class="nav-label">YOUR SPACE</div>
+      <nav id="main-nav">
+        <a href="#home" data-route="home"><span class="nav-icon">⌂</span> Overview</a>
+        <a href="#todo" data-route="todo"><span class="nav-icon">✓</span> To Do</a>
+        <a href="#budget" data-route="budget"><span class="nav-icon">◈</span> Budget</a>
+        <a href="#events" data-route="events"><span class="nav-icon">▦</span> Events</a>
+        <a href="#meals" data-route="meals"><span class="nav-icon">◉</span> Meals</a>
+        <a href="#shopping" data-route="shopping"><span class="nav-icon">▤</span> Shopping</a>
+        <a href="#nutrition" data-route="nutrition"><span class="nav-icon">♡</span> Nutrition</a>
+        <a href="#logs" data-route="logs"><span class="nav-icon">◴</span> Food log</a>
+        <a href="#archive" data-route="archive"><span class="nav-icon">▥</span> Sheet archive</a>
+      </nav>
+      <div class="sidebar-bottom"><a href="#settings" data-route="settings"><span class="nav-icon">⚙</span> Data & settings</a><p>Private data stays on this device until you export it.</p></div>
+    </aside>
+    <div class="main-wrap">
+      <header class="topbar"><a class="mobile-brand" href="#home"><span class="brand-mark small">e.</span><b>everything</b></a><div class="topbar-right"><span class="privacy-dot"></span><span class="desktop-only">Private on this device</span><button type="button" class="pill-button" id="backup-shortcut">Export backup</button></div></header>
+      <main id="app" tabindex="-1" aria-live="polite"><div class="loading">Opening your space…</div></main>
+      <footer class="page-footer">Made for your phone & laptop · Everything runs in your browser</footer>
+    </div>
+    <nav class="bottom-nav" aria-label="Mobile navigation"><a href="#home" data-route="home"><b>⌂</b><span>Home</span></a><a href="#todo" data-route="todo"><b>✓</b><span>To Do</span></a><a href="#logs" data-route="logs"><b>◴</b><span>Food log</span></a><a href="#meals" data-route="meals"><b>◉</b><span>Meals</span></a><a href="#shopping" data-route="shopping"><b>▤</b><span>Shopping</span></a><a href="#more" data-route="more"><b>☷</b><span>More</span></a></nav>
+  </div>
+  <div id="quick-add-wrap" class="quick-add-wrap"><div id="quick-add-menu" class="quick-add-menu" role="group" aria-label="Quick add actions" hidden>
+    <button type="button" data-action="new-log">◴ &nbsp; Log food</button>
+    <button type="button" data-action="new-task">✓ &nbsp; Add a task</button>
+    <button type="button" data-action="new-extra">▤ &nbsp; Add shopping item</button>
+    <button type="button" data-action="water-250">＋ &nbsp; Add 250 ml water</button>
+    <button type="button" data-action="water-500">＋ &nbsp; Add 500 ml water</button>
+  </div><button id="quick-add-button" type="button" class="quick-add-button" aria-label="Quick Add" aria-expanded="false" aria-controls="quick-add-menu" data-action="toggle-quick-add">＋ <span>Quick add</span></button></div>
+  <dialog id="edit-dialog"><form id="edit-form" method="dialog"><div id="dialog-content"></div></form></dialog>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <input id="json-import" type="file" hidden>
+  <script src="./app.js" defer></script>
+</body>
+</html>

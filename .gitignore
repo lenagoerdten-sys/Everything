@@ -1,0 +1,9 @@
+# Do not upload personal Excel files, private JSON data, or backups.
+*PRIVATE*.json
+*BACKUP*.json
+*.xlsm
+*.xlsx
+*.xls
+*.csv
+.env
+.DS_Store
