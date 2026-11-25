@@ -93,3 +93,27 @@
 .note-password-fields .form-help{grid-column:1/-1}
 .secure-note-error{font-size:13px;color:#bd3e36;min-height:0;margin:8px 0}
 @media(max-width:550px){.note-password-fields{grid-template-columns:1fr}.note-open{padding:16px}.note-detail{padding:18px}}
+
+/* Compact mobile Notes + colour sorting (focused update). */
+.sort-buttons{display:inline-flex;align-items:center;gap:3px;padding:3px;background:#eef4f2;border:1px solid #dce7e3;border-radius:11px;flex-shrink:0}
+.sort-label{font-size:11px;color:#59736e;font-weight:700;padding:0 5px 0 7px}
+.sort-button{border:0;background:transparent;border-radius:8px;padding:8px 11px;min-height:34px;color:#526d68;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap}
+.sort-button.active{background:#fff;color:#155f54;box-shadow:0 1px 4px #0e35221c}
+.sort-button:focus-visible{outline:2px solid #1e8775;outline-offset:1px}
+.note-compact .note-open{display:flex;flex-direction:row;align-items:center;justify-content:space-between;gap:10px;min-width:0}
+.note-compact-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.35;font-size:15px;font-weight:750}
+.note-compact-trailing{flex:0 0 auto;display:inline-flex;align-items:center;gap:9px;color:#667d79}
+.note-compact-trailing .note-color-dot{width:15px;height:15px;box-shadow:0 0 0 1px #dbe5e1}
+.note-compact-lock{font-size:13px;line-height:1}
+.note-chevron{font-size:20px;line-height:1;color:#7c8f8a}
+@media(max-width:550px){
+ .notes-grid{gap:5px}
+ .notes-grid .note-compact{padding:0;min-height:48px;border-radius:10px;border-left-width:4px}
+ .notes-grid .note-compact .note-open{padding:9px 12px;min-height:48px;gap:8px}
+ .notes-grid .note-compact-title{font-size:13px;font-weight:720}
+ .notes-grid .note-compact-trailing{gap:7px}
+ .notes-grid .note-compact-trailing .note-color-dot{width:13px;height:13px}
+ .sort-buttons{width:100%;justify-content:flex-end}
+ .sort-label{margin-right:auto}
+ .sort-button{flex:1;text-align:center}
+}
