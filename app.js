@@ -13,6 +13,10 @@ let importFeedback='';
 let data=load(); let route='home'; let pendingImport=''; let checkedShop=new Set(); let randomizedRecipes=[]; let filter={tasks:'due7',taskSearch:'',events:'all',eventSearch:'',recipes:'',recipeCat:'all',recipeMin:'',recipeMax:'',nutrients:'',logMonth:'all',archiveSheet:'',archiveSearch:'',archivePage:0,notes:''};
 checkedShop=new Set(data.shoppingChecked||[]);
 let toastTimer;
+// Decrypted protected notes exist only in temporary memory while opened.
+let activeNoteId='';
+let unlockedNote=null;
+function lockOpenNote(){activeNoteId='';unlockedNote=null;}
 function load(){try{const x=JSON.parse(localStorage.getItem(STORE_KEY)||'null');return normalize(x);}catch{return BLANK();}}
 function normalize(obj){const base=BLANK();if(!obj||typeof obj!=='object')return base;for(const k of ['todo','events','recipes','extras','shoppingFoods','selectedMeals','nutrients','foodLogs','notes','foodFavorites'])if(Array.isArray(obj[k]))base[k]=obj[k];if(obj.budget&&typeof obj.budget==='object')base.budget={...base.budget,...obj.budget,monthly:Array.isArray(obj.budget.monthly)?obj.budget.monthly:[],bills:Array.isArray(obj.budget.bills)?obj.budget.bills:[]};if(obj.archive&&typeof obj.archive==='object'&&!Array.isArray(obj.archive))base.archive=obj.archive;if(obj.water&&typeof obj.water==='object'&&!Array.isArray(obj.water))base.water=obj.water;if(Array.isArray(obj.shoppingChecked))base.shoppingChecked=obj.shoppingChecked;if(obj.targets&&typeof obj.targets==='object')for(const k of ['calories','protein','carbs','fat','fiber','water'])base.targets[k]=Math.max(0,Number(obj.targets[k])||0);return base;}
 function save(){try{localStorage.setItem(STORE_KEY,JSON.stringify(data));return true;}catch(e){toast('Storage is full or unavailable. Export a backup now.');return false;}}
@@ -27,7 +31,7 @@ function diffDays(s){const date=safeDate(s);if(!date)return null;const d=new Dat
 function prettyDate(s){if(!safeDate(s))return esc(s||'No date');return new Date(s+'T12:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'});}
 function toast(message){const el=document.getElementById('toast');el.textContent=message;el.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.remove('show'),3400);}
 const n=(v)=>Number(v)||0;
-function navigate(name){const menu=document.getElementById('quick-add-menu');if(menu)menu.hidden=true;if(!NAV.includes(name))name='home';route=name;for(const a of document.querySelectorAll('[data-route]'))a.classList.toggle('active',a.dataset.route===route);render();window.scrollTo({top:0,behavior:'instant'});}
+function navigate(name){if(name!=='notes')lockOpenNote();const menu=document.getElementById('quick-add-menu');if(menu)menu.hidden=true;if(!NAV.includes(name))name='home';route=name;for(const a of document.querySelectorAll('[data-route]'))a.classList.toggle('active',a.dataset.route===route);render();window.scrollTo({top:0,behavior:'instant'});}
 function headline(label,title,subtitle,actions=''){return `<div class="page-heading"><div><p class="eyebrow">${esc(label)}</p><h1 class="hero-title">${esc(title)}</h1><p>${esc(subtitle)}</p></div>${actions?`<div class="actions">${actions}</div>`:''}</div>`;}
 function btn(label,act,extra='',idValue=''){return `<button class="btn ${extra}" type="button" data-action="${esc(act)}"${idValue?` data-id="${esc(idValue)}"`:''}>${label}</button>`;}
 function empty(icon,title,subtitle,action=''){return `<div class="empty"><div class="empty-icon">${icon}</div><strong>${esc(title)}</strong><p>${esc(subtitle)}</p>${action}</div>`;}
@@ -171,36 +175,135 @@ function shoppingView(){
  <section class="card"><div class="flex-between"><h2>Other shopping items</h2><span class="tag">${extras.length} selected</span></div><p class="tiny">Reusable non-food checklist: choose items by category or add free-text items below. Tick purchased items in the shopping list; they stay there to uncheck again later.</p>${cats.map(cat=>`<div class="shopping-category"><h3>${esc(cat)}</h3>${byCat[cat].map(x=>`<div class="extra-choice"><label><input type="checkbox" class="plain-check" data-extra-toggle="${esc(x.id)}" ${x.selected?'checked':''}><span>${esc(x.name)}</span></label>${btn('Edit','edit-extra','small light',x.id)}${btn('×','delete-extra','small danger',x.id)}</div>`).join('')}<div class="add-extra-row"><input class="field" data-category-input="${esc(cat)}" placeholder="Add new ${esc(cat)} item" aria-label="New ${esc(cat)} shopping item"><button type="button" class="btn small secondary" data-action="quick-extra" data-id="${esc(cat)}">Add</button></div></div>`).join('')}</section></div></div>
  <div class="section-head"><h2>Selected recipes</h2><span class="tiny">${data.selectedMeals.length} recipes</span></div><div class="pill-list">${data.selectedMeals.map(name=>`<span class="tag accent">${esc(name)}</span>`).join('')||'<span class="muted">No recipes selected.</span>'}</div>`;
 }
+// Optional note encryption: PBKDF2-SHA256 (310,000 iterations) + AES-256-GCM.
+// Titles, type and colour are deliberately public; text and checklist entries are encrypted.
+const NOTE_CRYPTO_ITERATIONS=310000;
+const byteToBase64=(bytes)=>{let str='';for(let i=0;i<bytes.length;i+=8192)str+=String.fromCharCode(...bytes.subarray(i,i+8192));return btoa(str);};
+const base64ToByte=(value)=>Uint8Array.from(atob(value),c=>c.charCodeAt(0));
+function secureNotesAvailable(){return Boolean(window.isSecureContext&&window.crypto?.subtle&&window.crypto?.getRandomValues);}
+function noteRandom(length){const bytes=new Uint8Array(length);crypto.getRandomValues(bytes);return bytes;}
+async function noteKey(password,salt,iterations=NOTE_CRYPTO_ITERATIONS){
+ const keyMaterial=await crypto.subtle.importKey('raw',new TextEncoder().encode(password),'PBKDF2',false,['deriveKey']);
+ return crypto.subtle.deriveKey({name:'PBKDF2',hash:'SHA-256',salt,iterations},keyMaterial,{name:'AES-GCM',length:256},false,['encrypt','decrypt']);
+}
+async function encryptNoteContent(plain,key,existingSecure=null){
+ const salt=existingSecure?existingSecure.salt:byteToBase64(noteRandom(16));
+ const iv=noteRandom(12);
+ const bytes=new TextEncoder().encode(JSON.stringify({content:String(plain.content||''),items:plain.items||[]}));
+ const ciphertext=await crypto.subtle.encrypt({name:'AES-GCM',iv,additionalData:new TextEncoder().encode('Everything note v1')},key,bytes);
+ return {version:1,method:'AES-256-GCM',kdf:'PBKDF2-SHA256',iterations:existingSecure?.iterations||NOTE_CRYPTO_ITERATIONS,salt,iv:byteToBase64(iv),ciphertext:byteToBase64(new Uint8Array(ciphertext))};
+}
+async function protectNoteContent(plain,password){
+ const salt=byteToBase64(noteRandom(16));
+ const key=await noteKey(password,base64ToByte(salt));
+ const secure=await encryptNoteContent(plain,key,{salt,iterations:NOTE_CRYPTO_ITERATIONS});
+ return {secure,key};
+}
+async function decryptNoteContent(note,password){
+ if(!secureNotesAvailable())throw new Error('Secure notes need HTTPS (your GitHub Pages website) and a browser with Web Crypto.');
+ const sec=note.secure;
+ if(!sec||sec.version!==1||sec.method!=='AES-256-GCM'||sec.kdf!=='PBKDF2-SHA256'||!Number.isInteger(sec.iterations)||sec.iterations<100000||sec.iterations>2000000)throw new Error('Unsupported encrypted note format.');
+ if(base64ToByte(sec.salt).length!==16||base64ToByte(sec.iv).length!==12)throw new Error('Invalid encrypted note data.');
+ const key=await noteKey(password,base64ToByte(sec.salt),sec.iterations);
+ const bytes=await crypto.subtle.decrypt({name:'AES-GCM',iv:base64ToByte(sec.iv),additionalData:new TextEncoder().encode('Everything note v1')},key,base64ToByte(sec.ciphertext));
+ const plain=JSON.parse(new TextDecoder().decode(bytes));
+ if(!plain||typeof plain.content!=='string'||!Array.isArray(plain.items))throw new Error('Invalid note contents.');
+ return {content:plain.content,items:plain.items,key};
+}
+function openSecureNote(note,onSuccess){
+ if(!secureNotesAvailable()){toast('Protected notes need HTTPS and a compatible browser.');return;}
+ DIALOG_CONTENT.innerHTML=`<h2>Unlock note</h2><p class="tiny">${esc(note.title)} · Enter this note's password. Its title and colour are not encrypted.</p><label class="input-label wide">Note password<input type="password" class="field" id="note-unlock-password" required autocomplete="off" autofocus></label><p class="secure-note-error" role="alert" id="note-unlock-error"></p><div class="dialog-actions"><button type="button" class="btn light" id="modal-cancel">Cancel</button><button class="btn" type="submit" id="note-unlock-submit">Unlock</button></div>`;
+ const form=EDIT_FORM;
+ document.getElementById('modal-cancel').onclick=()=>DIALOG.close();
+ form.onsubmit=async event=>{event.preventDefault();const button=document.getElementById('note-unlock-submit');button.disabled=true;document.getElementById('note-unlock-error').textContent='';try{
+  const password=document.getElementById('note-unlock-password').value;
+  const decrypted=await decryptNoteContent(note,password);
+  unlockedNote={id:note.id,content:decrypted.content,items:decrypted.items,key:decrypted.key};
+  activeNoteId=note.id;
+  document.getElementById('note-unlock-password').value='';
+  DIALOG.close();DIALOG_CONTENT.replaceChildren();render();
+  if(onSuccess)onSuccess();
+ }catch(err){document.getElementById('note-unlock-error').textContent='Could not unlock. Check the password (or the backup file).';button.disabled=false;}};
+ DIALOG.showModal();document.getElementById('note-unlock-password').focus();
+}
 function noteForm(note){
+ if(note?.secure&&unlockedNote?.id!==note.id){openSecureNote(note,()=>noteForm(note));return;}
  const existing=note||{title:'',type:'text',color:'none',content:'',items:[]};
- modal(note?'Edit note':'Create note or checklist',[
-  inputField('title','Title',existing.title,'text',{required:true,wide:true}),
-  inputField('type','Note type',existing.type,'select',{choices:['text','checklist']}),
-  inputField('color','Colour label',NOTE_COLORS[existing.color]?existing.color:'none','select',{choices:Object.keys(NOTE_COLORS)}),
-  inputField('content','General text',existing.content||'','textarea',{wide:true,help:'Free text, ideas or longer notes.'}),
-  inputField('lines','Checklist items (one per line)',(existing.items||[]).map(x=>x.text).join('\n'),'textarea',{wide:true,help:'Write one item on each line. Check them off directly in Notes.'})
- ],o=>{
-  if(!o.title.trim()){toast('Enter a title for your note.');return false;}
-  const updated={title:o.title.trim(),type:o.type==='checklist'?'checklist':'text',color:NOTE_COLORS[o.color]?o.color:'none',content:o.content};
-  const oldItems=[...(existing.items||[])];const claimed=new Set();
-  updated.items=String(o.lines||'').split(/\r?\n/).map(line=>line.trim()).filter(Boolean).map(text=>{const oldIndex=oldItems.findIndex((it,i)=>!claimed.has(i)&&it.text===text);if(oldIndex>=0){claimed.add(oldIndex);return {...oldItems[oldIndex]};}return {id:id(),text,checked:false};});
-  if(note)Object.assign(note,updated);else data.notes.push({id:id(),...updated});
- });
+ const plain=note?.secure?unlockedNote:existing;
+ const prevItems=plain.items||[];
+ DIALOG_CONTENT.innerHTML=`<h2>${note?'Edit note':'Create note or checklist'}</h2><div class="form-grid">
+ ${inputField('title','Title',existing.title,'text',{required:true,wide:true})}
+ ${inputField('type','Note type',existing.type,'select',{choices:['text','checklist']})}
+ ${inputField('color','Colour label',NOTE_COLORS[existing.color]?existing.color:'none','select',{choices:Object.keys(NOTE_COLORS)})}
+ ${inputField('content','General text',plain.content||'','textarea',{wide:true,help:'The text appears only when you open the note.'})}
+ ${inputField('lines','Checklist items (one per line)',prevItems.map(x=>x.text).join('\n'),'textarea',{wide:true,help:'Items are displayed after opening the note.'})}
+ <label class="input-label wide note-security-choice"><span><input id="note-protection" type="checkbox" ${existing.secure?'checked':''}> Password-protect this note</span><span class="form-help">Encrypts the text and checklist, including in JSON backups. Title and colour remain visible.</span></label>
+ <div id="note-password-fields" class="note-password-fields wide" hidden>
+  <label class="input-label">${existing.secure?'New password (optional)':'Password'}<input id="note-new-password" class="field" type="password" minlength="10" autocomplete="new-password" placeholder="At least 10 characters"></label>
+  <label class="input-label">Confirm password<input id="note-confirm-password" class="field" type="password" autocomplete="new-password"></label>
+  <span class="form-help">${existing.secure?'Leave both fields empty to keep your existing password.':'There is no password recovery. Store your password somewhere safe.'}</span>
+ </div></div><p id="note-save-error" role="alert" class="secure-note-error"></p><div class="dialog-actions"><button type="button" class="btn light" id="modal-cancel">Cancel</button><button type="submit" class="btn" id="note-save-submit">Save note</button></div>`;
  const typeInput=DIALOG_CONTENT.querySelector('[data-field="type"]');
  const txt=DIALOG_CONTENT.querySelector('[data-field="content"]').closest('label');
  const checklist=DIALOG_CONTENT.querySelector('[data-field="lines"]').closest('label');
- const sync=()=>{txt.hidden=typeInput.value==='checklist';checklist.hidden=typeInput.value!=='checklist';};
- typeInput.addEventListener('change',sync);sync();
+ const protection=document.getElementById('note-protection');
+ const passwordFields=document.getElementById('note-password-fields');
+ function sync(){txt.hidden=typeInput.value==='checklist';checklist.hidden=typeInput.value!=='checklist';passwordFields.hidden=!protection.checked;}
+ typeInput.addEventListener('change',sync);protection.addEventListener('change',sync);sync();
+ document.getElementById('modal-cancel').onclick=()=>DIALOG.close();
+ EDIT_FORM.onsubmit=async event=>{
+  event.preventDefault();const error=document.getElementById('note-save-error');error.textContent='';
+  const submit=document.getElementById('note-save-submit');submit.disabled=true;
+  try{
+   const get=k=>DIALOG_CONTENT.querySelector(`[data-field="${k}"]`).value;
+   const title=get('title').trim();if(!title)throw new Error('Enter a note title.');
+   const type=get('type')==='checklist'?'checklist':'text';const color=NOTE_COLORS[get('color')]?get('color'):'none';
+   const claimed=new Set();
+   const items=get('lines').split(/\r?\n/).map(line=>line.trim()).filter(Boolean).map(text=>{const oldIndex=prevItems.findIndex((it,i)=>!claimed.has(i)&&it.text===text);if(oldIndex>=0){claimed.add(oldIndex);return {...prevItems[oldIndex]};}return {id:id(),text,checked:false};});
+   const contents={content:get('content'),items};
+   const record={id:note?.id||id(),title,type,color};
+   if(protection.checked){
+    if(!secureNotesAvailable())throw new Error('Protected notes require HTTPS and a browser that supports encryption.');
+    const pass=document.getElementById('note-new-password').value;
+    const confirmPassword=document.getElementById('note-confirm-password').value;
+    if(pass||confirmPassword||!existing.secure){
+      if(pass.length<10)throw new Error('Use a password with at least 10 characters.');
+      if(pass!==confirmPassword)throw new Error('Passwords do not match.');
+      const result=await protectNoteContent(contents,pass);record.secure=result.secure;
+    }else{
+      if(unlockedNote?.id!==note.id||!unlockedNote.key)throw new Error('Unlock this note before editing.');
+      record.secure=await encryptNoteContent(contents,unlockedNote.key,existing.secure);
+    }
+   }else{
+    if(existing.secure&&!confirm('Remove password protection? This note will be stored in plain text and will be readable in future backups.')){submit.disabled=false;return;}
+    record.content=contents.content;record.items=contents.items;
+   }
+   const index=note?data.notes.findIndex(x=>x.id===note.id):-1;
+   const original=index>=0?data.notes[index]:null;
+   if(index>=0)data.notes[index]=record;else data.notes.push(record);
+   if(!save()){if(index>=0)data.notes[index]=original;else data.notes.pop();throw new Error('Could not save the note. Your previous data was kept.');}
+   unlockedNote=null;activeNoteId=protection.checked?'':record.id;
+   DIALOG.close();DIALOG_CONTENT.replaceChildren();
+   if(route!=='notes')navigate('notes');else render();
+   toast(protection.checked?'Encrypted note saved.':'Note saved.');
+  }catch(err){error.textContent=err.message||'Note could not be saved.';submit.disabled=false;}
+ };
+ DIALOG.showModal();DIALOG_CONTENT.querySelector('[data-field="title"]').focus();
 }
 function notesView(){
  const q=filter.notes.toLocaleLowerCase();
- const notes=data.notes.filter(note=>[note.title,note.content,...(note.items||[]).map(x=>x.text)].join(' ').toLocaleLowerCase().includes(q)).slice().reverse();
- const noteHtml=note=>{const color=NOTE_COLORS[note.color]||NOTE_COLORS.none;
-  const items=(note.items||[]).slice().sort((a,b)=>Number(Boolean(a.checked))-Number(Boolean(b.checked)));
-  return `<article class="card note-card" style="--note-accent:${color}"><div class="note-head"><div><span class="note-type">${note.type==='checklist'?'Checklist':'Text note'}</span><h2>${esc(note.title)}</h2></div><span class="note-color-dot" title="${esc(note.color||'none')}"></span></div>
-  ${note.type==='checklist'?`<div class="note-checklist">${items.length?items.map(it=>`<label class="note-check"><input type="checkbox" data-note-check="${esc(note.id+'::'+it.id)}" ${it.checked?'checked':''}><span class="${it.checked?'checked-text':''}">${esc(it.text)}</span></label>`).join(''):'<p class="tiny">No checklist items yet. Select Edit to add some.</p>'}</div><p class="tiny">${items.filter(x=>x.checked).length} / ${items.length} completed</p>`:`<div class="note-body">${esc(note.content||'No text yet.')}</div>`}
-  <div class="note-actions">${btn('Edit','edit-note','small secondary',note.id)}${btn('Delete','delete-note','small light',note.id)}</div></article>`;};
- return headline('MY SPACE','Notes','Colour-coded text notes and reusable checklists, saved privately with Everything.',btn('+ New note','new-note'))+`<div class="toolbar"><input class="search" data-filter="notes" value="${esc(filter.notes)}" placeholder="Search notes, lists or checklist items…"></div>${notes.length?`<div class="notes-grid">${notes.map(noteHtml).join('')}</div>`:empty('▤','No notes found','Create a new text note or checklist. You can give each note a colour.',btn('+ New note','new-note'))}`;
+ const selected=data.notes.find(x=>x.id===activeNoteId);
+ if(selected){
+  if(selected.secure&&unlockedNote?.id!==selected.id){lockOpenNote();return notesView();}
+  const color=NOTE_COLORS[selected.color]||NOTE_COLORS.none;
+  const content=selected.secure?unlockedNote:selected;
+  const items=(content.items||[]).slice().sort((a,b)=>Number(Boolean(a.checked))-Number(Boolean(b.checked)));
+  const body=selected.type==='checklist'?`<div class="note-checklist">${items.length?items.map(it=>`<label class="note-check"><input type="checkbox" data-note-check="${esc(selected.id+'::'+it.id)}" ${it.checked?'checked':''}><span class="${it.checked?'checked-text':''}">${esc(it.text)}</span></label>`).join(''):'<p class="tiny">No checklist items yet. Select Edit to add some.</p>'}</div><p class="tiny">${items.filter(x=>x.checked).length} of ${items.length} completed</p>`:`<div class="note-body">${esc(content.content||'No text yet.')}</div>`;
+  return `<div class="note-detail-toolbar">${btn('← All notes','back-notes','light')}${selected.secure?btn('🔒 Lock','lock-note','light'):''}</div><article class="card note-card note-detail" style="--note-accent:${color}"><div class="note-head"><div><span class="note-type">${esc(selected.type==='checklist'?'Checklist':'Text note')}${selected.secure?' · Protected':''}</span><h2>${esc(selected.title)}</h2></div><span class="note-color-dot" title="${esc(selected.color||'none')}"></span></div>${body}<div class="note-actions">${btn('Edit','edit-note','small secondary',selected.id)}${btn('Delete','delete-note','small light',selected.id)}</div></article>`;
+ }
+ const notes=data.notes.filter(note=>[note.title,...(note.secure?[]:[note.content,...(note.items||[]).map(x=>x.text)])].join(' ').toLocaleLowerCase().includes(q)).slice().reverse();
+ const noteHtml=note=>{const color=NOTE_COLORS[note.color]||NOTE_COLORS.none;return `<article class="card note-card note-compact" style="--note-accent:${color}"><button type="button" class="note-open" data-action="open-note" data-id="${esc(note.id)}" aria-label="Open ${esc(note.title)}${note.secure?' (password required)':''}"><div class="note-head"><div><h2>${esc(note.title)}</h2></div><span class="note-color-dot" title="${esc(note.color||'none')}"></span></div><span class="note-compact-footer">${note.secure?'🔒':''}<span aria-hidden="true">›</span></span></button></article>`;};
+ return headline('MY SPACE','Notes','Tap a title to open a note. Optional passwords protect the contents.',btn('+ New note','new-note'))+`<div class="toolbar"><input class="search" data-filter="notes" value="${esc(filter.notes)}" placeholder="Search note titles…"></div>${notes.length?`<div class="notes-grid">${notes.map(noteHtml).join('')}</div>`:empty('▤','No notes found','Create a note or checklist. You can set a colour and an optional password.',btn('+ New note','new-note'))}`;
 }
 function nutrientForm(item){modal(item?'Edit nutrition reference':'New nutrition ingredient',[inputField('name','Ingredient name',item?.name||'','text',{required:true,wide:true}),inputField('category','Supermarket category (for shopping list)',item?.category||'Uncategorized ingredients','text',{wide:true}),...['protein','calories','fat','carbs','fiber'].map(k=>inputField(k,k[0].toUpperCase()+k.slice(1)+' per 100 g/ml',item?.[k]??0,'number',{step:'any'}))],o=>{const name=o.name.trim();if(!name)return false;o.category=o.category.trim()||'Uncategorized ingredients';if(data.nutrients.some(x=>x!==item&&x.name.toLocaleLowerCase()===name.toLocaleLowerCase())){toast('An ingredient with that name already exists. Edit the existing entry.');return false;}if(item)Object.assign(item,{...o,name});else data.nutrients.push({id:id(),...o,name});});}
 function nutritionView(){const q=filter.nutrients.toLowerCase();const items=data.nutrients.filter(x=>x.name.toLowerCase().includes(q)).sort((a,b)=>a.name.localeCompare(b.name));return headline('REFERENCE','Nutrition','The ingredient database used to calculate recipe macros.',btn('+ New ingredient','new-nutrient'))+`<div class="notice blue" style="margin-bottom:18px">Recipe entries must use a name from this reference list. Values are interpreted <b>per 100 g or 100 ml</b> to calculate recipes. Please confirm the units of imported Excel data, especially for items labeled by pieces or servings.</div><div class="toolbar"><input class="search" placeholder="Search ingredients…" data-filter="nutrients" value="${esc(filter.nutrients)}"></div>${items.length?`<div class="scroll-table"><table class="data-table"><thead><tr><th>Ingredient</th><th>Protein (g)</th><th>Calories</th><th>Fat (g)</th><th>Carbs (g)</th><th>Fiber (g)</th><th></th></tr></thead><tbody>${items.slice(0,150).map(x=>`<tr><td><b>${esc(x.name)}</b></td>${['protein','calories','fat','carbs','fiber'].map(k=>`<td>${fmtNumber(x[k],2)}</td>`).join('')}<td>${btn('Log','log-nutrient','small secondary',x.id)} ${btn('Edit','edit-nutrient','small light',x.id)}</td></tr>`).join('')}</tbody></table></div>${items.length>150?`<p class="tiny">Showing 150 of ${items.length}. Search to narrow results.</p>`:''}`:empty('♡','No ingredient references','Create a nutrient record before using it in a new recipe.')}`;}
@@ -442,7 +545,7 @@ async function handleImportFile(file,requestedKind='auto'){
   let serialized;
   try{serialized=JSON.stringify(candidate);localStorage.setItem(STORE_KEY,serialized);if(localStorage.getItem(STORE_KEY)!==serialized)throw new Error('Storage verification failed');}
   catch(e){throw new Error('The browser could not save the backup (storage full or blocked). Your original data was kept. Try using a regularly installed GitHub Pages version or free browser storage, then retry.');}
-  data=candidate;checkedShop=new Set(data.shoppingChecked||[]);randomizedRecipes=[];
+  data=candidate;lockOpenNote();checkedShop=new Set(data.shoppingChecked||[]);randomizedRecipes=[];
   importFeedback=`Restored ${file.name} successfully. On this device: ${counts}. Export another backup after making new changes.`;
   render();toast('Backup imported and saved successfully.');
  }catch(error){importFeedback='Import not completed: '+(error?.message||String(error));render();toast('Import failed. See Data & settings for details.');}
@@ -465,21 +568,24 @@ case 'new-event':eventForm();break;case 'edit-event':eventForm(data.events.find(
 case 'new-recipe':recipeForm();break;case 'edit-recipe':recipeForm(data.recipes.find(x=>x.id===key));break;case 'delete-recipe':obj=data.recipes.find(x=>x.id===key);confirmDelete('Delete this recipe?',()=>{data.recipes=data.recipes.filter(x=>x.id!==key);data.selectedMeals=data.selectedMeals.filter(x=>x!==obj?.name);randomizedRecipes=randomizedRecipes.filter(x=>x!==key);});break;case 'toggle-recipe':obj=data.recipes.find(x=>x.id===key);if(obj){data.selectedMeals=data.selectedMeals.includes(obj.name)?data.selectedMeals.filter(v=>v!==obj.name):[...data.selectedMeals,obj.name];save();render();}break;
 case 'random-recipes':{const source=data.recipes.filter(x=>recipeMacros(x).complete);const pool=(source.length>=3?source:data.recipes).slice();for(let i=pool.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[pool[i],pool[j]]=[pool[j],pool[i]];}randomizedRecipes=pool.slice(0,3).map(x=>x.id);render();toast(randomizedRecipes.length?`${randomizedRecipes.length} random recipe(s) picked.`:'Add recipes first.');break;}
 case 'add-random-recipes':for(const rid of randomizedRecipes){const r=data.recipes.find(x=>x.id===rid);if(r&&!data.selectedMeals.includes(r.name))data.selectedMeals.push(r.name);}save();render();toast('Selected recipes added to shopping list.');break;
-case 'new-note':noteForm();break;case 'edit-note':noteForm(data.notes.find(x=>x.id===key));break;case 'delete-note':confirmDelete('Delete this note?',()=>data.notes=data.notes.filter(x=>x.id!==key));break;
+case 'new-note':noteForm();break;case 'open-note':obj=data.notes.find(x=>x.id===key);if(obj){if(obj.secure)openSecureNote(obj);else{activeNoteId=obj.id;unlockedNote=null;render();}}break;case 'back-notes':case 'lock-note':lockOpenNote();render();break;case 'edit-note':obj=data.notes.find(x=>x.id===key);if(obj)noteForm(obj);break;case 'delete-note':confirmDelete('Delete this note?',()=>{data.notes=data.notes.filter(x=>x.id!==key);lockOpenNote();});break;
 case 'remove-shopping-food':confirmDelete('Remove this food item from your shopping list?',()=>{data.shoppingFoods=data.shoppingFoods.filter(x=>x.id!==key);checkedShop.delete('food:'+key);data.shoppingChecked=[...checkedShop];});break;
 case 'new-extra':extraForm();break;case 'edit-extra':extraForm(data.extras.find(x=>x.id===key));break;case 'delete-extra':confirmDelete('Delete shopping item?',()=>data.extras=data.extras.filter(x=>x.id!==key));break;case 'quick-extra':{const input=[...APP.querySelectorAll('[data-category-input]')].find(el=>el.dataset.categoryInput===key);const name=input?.value.trim();if(!name){toast('Enter a shopping item name.');break;}if(data.extras.some(x=>x.category===key&&x.name.toLowerCase()===name.toLowerCase())){toast('This item already exists in that category.');break;}data.extras.push({id:id(),name,category:key,selected:true});save();render();toast('Shopping item added.');break;}
 case 'toggle-extra':obj=data.extras.find(x=>x.id===key);if(obj){obj.selected=!obj.selected;save();render();}break;case 'clear-shop-checks':checkedShop.clear();saveShoppingChecks();render();break;case 'export-shopping':exportShopping();break;
 case 'new-nutrient':nutrientForm();break;case 'edit-nutrient':nutrientForm(data.nutrients.find(x=>x.id===key));break;
 case 'log-nutrient':logEntryForm(null,null,{kind:'ingredient',id:key});break;case 'log-recipe':logEntryForm(null,null,{kind:'recipe',id:key});break;case 'new-log':logEntryForm();break;case 'add-log-day':logEntryForm(data.foodLogs.find(x=>x.id===key));break;case 'edit-log':[day,item]=getLogEntry(key);if(day&&item)logEntryForm(day,item);break;case 'delete-log':[day,item]=getLogEntry(key);if(day&&item)confirmDelete('Remove this food entry?',()=>{day.entries=day.entries.filter(x=>x.id!==item.id);});break;
 case 'prev-archive':filter.archivePage=Math.max(0,filter.archivePage-1);render();break;case 'next-archive':filter.archivePage++;render();break;case 'new-archive-row':if(!filter.archiveSheet){toast('Import data before adding archive rows.');break;}obj=data.archive[filter.archiveSheet]||[];idx=Math.max(0,...obj.map(x=>Number(x.row)||0))+1;obj.push({row:idx,cells:{A:''}});data.archive[filter.archiveSheet]=obj;save();filter.archivePage=Math.max(0,Math.ceil(obj.length/50)-1);filter.archiveSearch='';render();toast('Row added. Click a cell to edit.');break;case 'edit-archive':{const [rowStr,col]=key.split('::');const arr=data.archive[filter.archiveSheet]||[];const record=arr.find(x=>String(x.row)===rowStr);if(!record)return;modal(`Edit ${filter.archiveSheet} · ${col}${rowStr}`,[inputField('value','Cell value',record.cells[col]??'','textarea',{wide:true})],o=>{record.cells[col]=o.value;});break;}
-case 'import-todo':importBy('todo');break;case 'import-data':importBy('data');break;case 'import-all':importBy('all');break;case 'export-todo':exportBy('todo');break;case 'export-data':exportBy('data');break;case 'export-all':exportBy('all');break;case 'reset-all':if(confirm('This will permanently erase local app data on THIS device. Export a backup first. Continue?')){data=BLANK();checkedShop.clear();randomizedRecipes=[];save();render();toast('Local data erased.');}break;
+case 'import-todo':importBy('todo');break;case 'import-data':importBy('data');break;case 'import-all':importBy('all');break;case 'export-todo':exportBy('todo');break;case 'export-data':exportBy('data');break;case 'export-all':exportBy('all');break;case 'reset-all':if(confirm('This will permanently erase local app data on THIS device. Export a backup first. Continue?')){data=BLANK();lockOpenNote();checkedShop.clear();randomizedRecipes=[];save();render();toast('Local data erased.');}break;
 default:break;}}
 function getLogEntry(key){const [d,e]=key.split('::');const day=data.foodLogs.find(x=>x.id===d);return [day,day?.entries.find(x=>x.id===e)];}
 document.addEventListener('click',e=>{const button=e.target.closest('[data-action]');if(!button)return;e.preventDefault();onAction(button.dataset.action,button.dataset.id||'');});
 document.addEventListener('input',e=>{const fld=e.target.closest('[data-filter]');if(!fld||fld.type==='number'||fld.tagName==='SELECT')return;filter[fld.dataset.filter]=fld.value;const selectionStart=(typeof fld.selectionStart==='number')?fld.selectionStart:null;render();const replacement=APP.querySelector(`[data-filter="${fld.dataset.filter}"]`);replacement?.focus();if(selectionStart!==null&&replacement?.setSelectionRange)replacement.setSelectionRange(selectionStart,selectionStart);});
 document.addEventListener('submit',e=>{if(e.target?.id!=='shop-food-form')return;e.preventDefault();const name=document.getElementById('shopping-food-name')?.value?.trim();const ref=nutrientFor(name);if(!ref){toast('This food is not in Nutrition. Add its nutrition values there first.');return;}const amount=Number(document.getElementById('shopping-food-amount')?.value);const unit=document.getElementById('shopping-food-unit')?.value;if(!Number.isFinite(amount)||amount<=0||!['pcs','g','ml'].includes(unit)){toast('Enter a valid positive quantity.');return;}data.shoppingFoods.push({id:id(),nutritionId:ref.id||'',name:ref.name,amount,unit});save();render();toast('Food added from Nutrition.');});
-document.addEventListener('change',e=>{const filterField=e.target.closest('[data-filter]');if(filterField&&(filterField.type==='number'||filterField.tagName==='SELECT')){filter[filterField.dataset.filter]=filterField.value;render();return;}const noteCheck=e.target.closest('[data-note-check]');if(noteCheck){const [noteId,itemId]=noteCheck.dataset.noteCheck.split('::');const note=data.notes.find(x=>x.id===noteId);const item=note?.items?.find(x=>x.id===itemId);if(item){item.checked=noteCheck.checked;save();render();}return;}const extra=e.target.closest('[data-extra-toggle]');if(extra){onAction('toggle-extra',extra.dataset.extraToggle);return;}const check=e.target.closest('[data-shop-check]');if(check){if(check.checked)checkedShop.add(check.dataset.shopCheck);else checkedShop.delete(check.dataset.shopCheck);saveShoppingChecks();render();}});
+document.addEventListener('change',async e=>{const filterField=e.target.closest('[data-filter]');if(filterField&&(filterField.type==='number'||filterField.tagName==='SELECT')){filter[filterField.dataset.filter]=filterField.value;render();return;}const noteCheck=e.target.closest('[data-note-check]');if(noteCheck){const [noteId,itemId]=noteCheck.dataset.noteCheck.split('::');const note=data.notes.find(x=>x.id===noteId);const plain=note?.secure?(unlockedNote?.id===noteId?unlockedNote:null):note;const item=plain?.items?.find(x=>x.id===itemId);if(item){const wasChecked=item.checked;item.checked=noteCheck.checked;if(note.secure){noteCheck.disabled=true;try{const oldSec=note.secure;note.secure=await encryptNoteContent({content:unlockedNote.content,items:unlockedNote.items},unlockedNote.key,oldSec);if(!save()){note.secure=oldSec;item.checked=wasChecked;throw new Error('Storage is full');}}catch(error){item.checked=wasChecked;toast('Checklist change could not be saved.');}}else{if(!save())item.checked=wasChecked;}render();}return;}const extra=e.target.closest('[data-extra-toggle]');if(extra){onAction('toggle-extra',extra.dataset.extraToggle);return;}const check=e.target.closest('[data-shop-check]');if(check){if(check.checked)checkedShop.add(check.dataset.shopCheck);else checkedShop.delete(check.dataset.shopCheck);saveShoppingChecks();render();}});
 document.addEventListener('click',e=>{if(!e.target.closest('#quick-add-wrap')){const menu=document.getElementById('quick-add-menu');if(menu)menu.hidden=true;document.getElementById('quick-add-button')?.setAttribute('aria-expanded','false');}});document.addEventListener('keydown',e=>{if(e.key==='Escape'){const menu=document.getElementById('quick-add-menu');if(menu)menu.hidden=true;}if(e.key==='Enter'&&e.target.matches('[data-category-input]')){e.preventDefault();onAction('quick-extra',e.target.dataset.categoryInput);}});
+DIALOG.addEventListener('close',()=>{if(!DIALOG.open){DIALOG_CONTENT.replaceChildren();EDIT_FORM.onsubmit=null;}});
+document.addEventListener('visibilitychange',()=>{const sensitiveEditor=DIALOG.open&&(DIALOG_CONTENT.querySelector('#note-protection')?.checked||DIALOG_CONTENT.querySelector('#note-unlock-password'));if(document.hidden&&(unlockedNote||sensitiveEditor)){if(DIALOG.open){DIALOG.close();DIALOG_CONTENT.replaceChildren();}lockOpenNote();render();}});
+window.addEventListener('pagehide',lockOpenNote);
 window.addEventListener('hashchange',()=>navigate(location.hash.slice(1)));document.getElementById('backup-shortcut').onclick=()=>exportBy('all');
 if('serviceWorker' in navigator && location.protocol==='https:')navigator.serviceWorker.register('./sw.js').catch(()=>{});
 navigate(location.hash.slice(1)||'home');
