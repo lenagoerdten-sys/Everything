@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <link rel="icon" href="./icon.svg" type="image/svg+xml">
   <link rel="manifest" href="./manifest.webmanifest">
-  <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./styles.css?v=5.1-notes1">
   <title>Everything — your life, your way</title>
 </head>
 <body>
@@ -26,6 +26,7 @@
         <a href="#shopping" data-route="shopping"><span class="nav-icon">▤</span> Shopping</a>
         <a href="#nutrition" data-route="nutrition"><span class="nav-icon">♡</span> Nutrition</a>
         <a href="#logs" data-route="logs"><span class="nav-icon">◴</span> Food log</a>
+        <a href="#notes" data-route="notes"><span class="nav-icon">✎</span> Notes</a>
         <a href="#archive" data-route="archive"><span class="nav-icon">▥</span> Sheet archive</a>
       </nav>
       <div class="sidebar-bottom"><a href="#settings" data-route="settings"><span class="nav-icon">⚙</span> Data & settings</a><p>Private data stays on this device until you export it.</p></div>
@@ -40,13 +41,14 @@
   <div id="quick-add-wrap" class="quick-add-wrap"><div id="quick-add-menu" class="quick-add-menu" role="group" aria-label="Quick add actions" hidden>
     <button type="button" data-action="new-log">◴ &nbsp; Log food</button>
     <button type="button" data-action="new-task">✓ &nbsp; Add a task</button>
-    <button type="button" data-action="new-extra">▤ &nbsp; Add shopping item</button>
+    <button type="button" data-action="new-extra">▤ &nbsp; Add other item</button>
+    <button type="button" data-action="new-note">✎ &nbsp; Add note</button>
     <button type="button" data-action="water-250">＋ &nbsp; Add 250 ml water</button>
     <button type="button" data-action="water-500">＋ &nbsp; Add 500 ml water</button>
   </div><button id="quick-add-button" type="button" class="quick-add-button" aria-label="Quick Add" aria-expanded="false" aria-controls="quick-add-menu" data-action="toggle-quick-add">＋ <span>Quick add</span></button></div>
   <dialog id="edit-dialog"><form id="edit-form" method="dialog"><div id="dialog-content"></div></form></dialog>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <input id="json-import" type="file" hidden>
-  <script src="./app.js" defer></script>
+  <script src="./app.js?v=5.1-notes1" defer></script>
 </body>
 </html>

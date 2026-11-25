@@ -68,7 +68,7 @@ If you independently edit both devices after step 2, restoring the laptop's full
 ### To Do, Budget, Events, Archive
 
 - To Do offers colour labels, repeat-frequency dropdowns, **custom repeat intervals in whole days**, and filters for **due & overdue**, **due + 7 days**, or **all tasks**.
-- Budget has current balance, monthly reference income/cost entries, and **dated bills** with a paid/unpaid state. The daily allowance equals **(current balance − unpaid bills due through the next 25th) ÷ days including today**. Bills overdue and still unpaid are also reserved. Mark bills as paid and update the recorded bank balance when payment clears to avoid double-counting.
+- Budget has current balance, monthly reference income/cost entries, and **dated bills** with a paid/unpaid state. The daily allowance equals **(current balance − unpaid bills due through the next 24th) ÷ days including today**. Bills overdue and still unpaid are also reserved. Mark bills as paid and update the recorded bank balance when payment clears to avoid double-counting.
 - Events and the editable source-sheet archive remain available from the main navigation.
 - The Food Log remains a permanently visible tab in the phone's bottom navigation.
 
@@ -104,3 +104,21 @@ Existing v4 full backups, To Do JSON files and non-To-Do JSON files remain compa
 The import supports `everything-all` (full backup), `everything-todo` (tasks) and `everything-data` (all other data). It also provides a fallback file-reader for Android browsers that do not support `file.text()`. If browser storage cannot save the file, the app reports the failure rather than falsely reporting success.
 
 **Note for downloaded HTML previews:** Browsers may isolate local data by file path, and clearing app data can erase it. For reliable everyday use, host the code on GitHub Pages, then use the same URL on each device and keep periodic private JSON backups. Hosting the website does not publish your personal records.
+
+
+## Focused update: Notes, Shopping, and 24th-of-month budget
+
+- **Notes** is available in the desktop sidebar and **More** on Samsung. Create general text notes or line-by-line checklists, give each a colour (red, orange, yellow, green, blue, purple, or neutral), and check/uncheck items. Notes are included in Full backup and Other personal data exports.
+- **Food shopping items** can be added only by selecting an existing product or ingredient from **Nutrition**. Type a name into the Nutrition lookup on the Shopping page, enter a quantity, and click Add. If the item does not exist in Nutrition, enter its nutritional values there first. Existing recipe-ingredient shopping continues to work.
+- **Other shopping items** remain freely editable, reusable, and sorted by supermarket category. Tick an item in the checklist to move it into the visible **Already bought** area at the end. Uncheck it there when you need it again. Category-selection checkboxes control whether an item appears on the shopping list at all; purchased checkboxes control completion.
+- **Daily budget** uses the upcoming **24th** of the month, inclusive of today, and subtracts unpaid bills due by that date.
+- The original private browser storage key is unchanged. Export a full backup before updating files on GitHub, and do not commit private JSON backups. When using a previous v5.1 `everything-data` file that lacks Notes and shoppingFoods, the import preserves existing Notes and shopping foods instead of silently clearing them. A Full backup still replaces all sections.
+
+### Updating an existing published v5.1 app safely
+1. Open the existing website on your phone; export a **Full backup** before changing GitHub.
+2. In the GitHub repository, upload/replace the **files inside this folder**, at repository root. Do not upload the ZIP itself or any personal JSON.
+3. Wait for Pages to deploy, then reload the site. For an installed PWA, close and reopen it; if it still displays an old page, visit the Pages URL once in the browser to load the latest assets.
+4. Confirm that **Notes** appears under **More** on Samsung; existing browser data at the same web origin remains local.
+5. Test a new note and a shopping item; export another Full backup after editing.
+
+The grocery list blocks recipe ingredients that have no Nutrition reference: they are flagged in Shopping and excluded from the active grocery checklist until added to Nutrition.
